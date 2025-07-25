@@ -1,0 +1,77 @@
+version: '3.8'
+services:
+  redis-node-1:
+    build: .
+    container_name: redis-node-1
+    ports:
+      - "7001:6379"
+    volumes:
+      - ./data/node-1:/data
+    environment:
+      - REDIS_PASSWORD=pass
+    networks:
+      - redis-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "pass", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+  redis-node-2:
+    build: .
+    container_name: redis-node-2
+    ports:
+      - "7002:6379"
+    volumes:
+      - ./data/node-2:/data
+    environment:
+      - REDIS_PASSWORD=pass
+    networks:
+      - redis-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "pass", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+  redis-node-3:
+    build: .
+    container_name: redis-node-3
+    ports:
+      - "7003:6379"
+    volumes:
+      - ./data/node-3:/data
+    environment:
+      - REDIS_PASSWORD=pass
+    networks:
+      - redis-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "pass", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+  redis-exporter:
+    image: oliver006/redis_exporter
+    container_name: redis-exporter
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_PASSWORD=pass
+    networks:
+      - redis-cluster
+
+networks:
+  redis-cluster:
