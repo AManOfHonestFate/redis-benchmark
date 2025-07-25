@@ -63,6 +63,69 @@ services:
         limits:
           cpus: '0.50'
           memory: 512M
+  redis-node-4:
+    build: .
+    container_name: redis-node-4
+    ports:
+      - "7004:6379"
+    volumes:
+      - ./data/node-4:/data
+    environment:
+      - REDIS_PASSWORD=pass
+    networks:
+      - redis-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "pass", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+  redis-node-5:
+    build: .
+    container_name: redis-node-5
+    ports:
+      - "7005:6379"
+    volumes:
+      - ./data/node-5:/data
+    environment:
+      - REDIS_PASSWORD=pass
+    networks:
+      - redis-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "pass", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+  redis-node-6:
+    build: .
+    container_name: redis-node-6
+    ports:
+      - "7006:6379"
+    volumes:
+      - ./data/node-6:/data
+    environment:
+      - REDIS_PASSWORD=pass
+    networks:
+      - redis-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "pass", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
   redis-exporter:
     image: oliver006/redis_exporter
     container_name: redis-exporter

@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-NODE_IPS="redis-node-1:6379 redis-node-2:6379 redis-node-3:6379 "
+NODE_IPS="redis-node-1:6379 redis-node-2:6379 redis-node-3:6379 redis-node-4:6379 redis-node-5:6379 redis-node-6:6379 "
 REPLICAS=1
 PASSWORD="pass"
 echo ">>> Creating cluster with nodes: $NODE_IPS"
