@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"log"
+	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -30,7 +33,7 @@ func checkClusterHealth(rdb *redis.ClusterClient) {
 		log.Fatalf("Failed to get cluster info: %v", err)
 	}
 
-	log.Printf("CLUSTER INFO:\n%s", info)
+	log.Printf("\n\nCLUSTER INFO:\n%s\n\n", info)
 
 	// Parse cluster_state:ok
 	stateLine := ""
@@ -53,13 +56,42 @@ func containsOk(s string) bool {
 	return strings.Contains(s, "ok")
 }
 
+func readEnvFile() {
+	file, err := os.Open(".env")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		envVars := strings.Split(scanner.Text(), "=")
+		if len(envVars) != 2 {
+			log.Fatal("Invalid env file format")
+		}
+		os.Setenv(envVars[0], envVars[1])
+	}
+}
+
 func main() {
+	readEnvFile()
+
+	password, present := os.LookupEnv("REDIS_PASSWORD")
+	if !present {
+		log.Fatal("REDIS_PASSWORD is not set")
+	}
+
+	tcpConnections := atomic.Int64{}
 	rdb := redis.NewClusterClient(&redis.ClusterOptions{
 		Addrs:          []string{"localhost:7001", "localhost:7002", "localhost:7003"},
 		Protocol:       2,
 		Username:       "",
-		Password:       "pass",
+		Password:       password,
 		RouteByLatency: true,
+		OnConnect: func(ctx context.Context, cn *redis.Conn) error {
+			tcpConnections.Add(1)
+			return nil
+		},
 	})
 
 	err := rdb.ForEachShard(context.Background(), func(ctx context.Context, client *redis.Client) error {
@@ -79,10 +111,13 @@ func main() {
 	var scenarios []BenchmarkScenario
 	scenarios = append(scenarios, &RandomSetsScenario{
 		NumberOfSlots: slots,
+	}, &RandomReadsScenario{
+		NumberOfSlots: slots,
 	})
 
 	for _, scenario := range scenarios {
 		stats := scenario.Run(context.Background(), rdb, tasksPerWorker, workersCount)
+		stats.TCPConnections = tcpConnections.Load()
 		stats.Display()
 	}
 }

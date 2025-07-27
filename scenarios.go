@@ -13,7 +13,7 @@ import (
 )
 
 type Statistics struct {
-	TCPConnections atomic.Int64
+	TCPConnections int64
 	TotalTasks     atomic.Int64
 	ErrorCounter   atomic.Int64
 	LatencySum     time.Duration
@@ -22,13 +22,8 @@ type Statistics struct {
 }
 
 func (s *Statistics) Display() {
-	log.Printf("total tasks: %d, average latency: %v, error: %d, total connections: %d, time: %s",
-		s.TotalTasks.Load(), s.LatencySum/time.Duration(s.TotalTasks.Load()), s.ErrorCounter.Load(), s.TCPConnections.Load(), s.TestDuration)
-}
-
-type RandomSetsScenario struct {
-	wg            sync.WaitGroup
-	NumberOfSlots int
+	log.Printf("\n- total tasks: %d\n- average latency: %s\n- errors: %d\n- total connections: %d\n- time: %s\n",
+		s.TotalTasks.Load(), s.LatencySum/time.Duration(s.TotalTasks.Load()), s.ErrorCounter.Load(), s.TCPConnections, s.TestDuration)
 }
 
 func SetupContiniousKeys(rdb *redis.Client, slots int) {
@@ -43,50 +38,81 @@ func SetupContiniousKeys(rdb *redis.Client, slots int) {
 	cansel()
 }
 
-func (s *RandomSetsScenario) Run(ctx context.Context, rdb *redis.ClusterClient, tasks int64, workers int) *Statistics {
-	stats := Statistics{}
+func scenarioRunBasic(tasks int64, workers int, stats *Statistics, do func(*rand.Rand) (time.Duration, error)) {
+	wg := sync.WaitGroup{}
 	startTime := time.Now()
-	rdb.Options().OnConnect = func(ctx context.Context, cn *redis.Conn) error {
-		stats.mu.Lock()
-		stats.TCPConnections.Add(1)
-		stats.mu.Unlock()
-		return nil
-	}
 
 	for i := range workers {
-		s.wg.Add(1)
+		wg.Add(1)
 
 		go func() {
 			seed := rand.New(rand.NewSource(int64(i)))
-			defer s.wg.Done()
+			defer wg.Done()
 
 			for range tasks {
-				task := s.generateTask(seed)
-
-				timePreGet := time.Now()
-				_, err := rdb.Set(ctx, strconv.Itoa(task), task, 0).Result()
-				latency := time.Since(timePreGet)
+				latency, err := do(seed)
+				if err != nil {
+					stats.ErrorCounter.Add(1)
+				}
 
 				stats.mu.Lock()
 				stats.LatencySum += latency
 				stats.mu.Unlock()
-
-				if err != nil {
-					stats.ErrorCounter.Add(1)
-				}
 			}
 		}()
 	}
 
-	s.wg.Wait()
+	wg.Wait()
 
 	endTime := time.Now()
 	stats.TestDuration = endTime.Sub(startTime)
 	stats.TotalTasks.Add(tasks*int64(workers) - stats.ErrorCounter.Load())
+}
+
+type RandomSetsScenario struct {
+	NumberOfSlots int
+}
+
+func (s *RandomSetsScenario) Run(ctx context.Context, rdb *redis.ClusterClient, tasks int64, workers int) *Statistics {
+	stats := Statistics{}
+
+	scenarioRunBasic(tasks, workers, &stats, func(seed *rand.Rand) (time.Duration, error) {
+		task := s.generateTask(seed)
+
+		requestStart := time.Now()
+		_, err := rdb.Set(ctx, strconv.Itoa(task), task, 0).Result()
+		latency := time.Since(requestStart)
+
+		return latency, err
+	})
 
 	return &stats
 }
 
 func (s *RandomSetsScenario) generateTask(generator *rand.Rand) int {
+	return generator.Intn(s.NumberOfSlots)
+}
+
+type RandomReadsScenario struct {
+	NumberOfSlots int
+}
+
+func (s *RandomReadsScenario) Run(ctx context.Context, rdb *redis.ClusterClient, tasks int64, workers int) *Statistics {
+	stats := Statistics{}
+
+	scenarioRunBasic(tasks, workers, &stats, func(seed *rand.Rand) (time.Duration, error) {
+		task := s.generateTask(seed)
+
+		requestStart := time.Now()
+		_, err := rdb.Get(ctx, strconv.Itoa(task)).Result()
+		latency := time.Since(requestStart)
+
+		return latency, err
+	})
+
+	return &stats
+}
+
+func (s *RandomReadsScenario) generateTask(generator *rand.Rand) int {
 	return generator.Intn(s.NumberOfSlots)
 }
