@@ -21,6 +21,7 @@ const (
 
 type BenchmarkScenario interface {
 	Run(ctx context.Context, rdb *redis.ClusterClient, tasks int64, workers int) *Statistics
+	GetName() string
 }
 
 func checkClusterHealth(rdb *redis.ClusterClient) {
@@ -111,13 +112,16 @@ func main() {
 	var scenarios []BenchmarkScenario
 	scenarios = append(scenarios, &RandomSetsScenario{
 		NumberOfSlots: slots,
+		Name:          "RandomSets",
 	}, &RandomReadsScenario{
 		NumberOfSlots: slots,
+		Name:          "RandomReads",
 	})
 
 	for _, scenario := range scenarios {
 		stats := scenario.Run(context.Background(), rdb, tasksPerWorker, workersCount)
 		stats.TCPConnections = tcpConnections.Load()
+		log.Printf("\n%s\n", scenario.GetName())
 		stats.Display()
 	}
 }

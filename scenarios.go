@@ -71,6 +71,11 @@ func scenarioRunBasic(tasks int64, workers int, stats *Statistics, do func(*rand
 
 type RandomSetsScenario struct {
 	NumberOfSlots int
+	Name          string
+}
+
+func (s *RandomSetsScenario) GetName() string {
+	return s.Name
 }
 
 func (s *RandomSetsScenario) Run(ctx context.Context, rdb *redis.ClusterClient, tasks int64, workers int) *Statistics {
@@ -95,6 +100,11 @@ func (s *RandomSetsScenario) generateTask(generator *rand.Rand) int {
 
 type RandomReadsScenario struct {
 	NumberOfSlots int
+	Name          string
+}
+
+func (s *RandomReadsScenario) GetName() string {
+	return s.Name
 }
 
 func (s *RandomReadsScenario) Run(ctx context.Context, rdb *redis.ClusterClient, tasks int64, workers int) *Statistics {
