@@ -24,34 +24,13 @@ type Statistics struct {
 
 func (s *Statistics) Display() string {
 	return fmt.Sprintf("\n- total tasks: %d\n- average latency: %s\n- errors: %d\n- total connections: %d\n- time: %s\n",
-		s.TotalTasks.Load(), s.LatencySum/time.Duration(s.TotalTasks.Load()+s.ErrorCounter.Load()), s.ErrorCounter.Load(), s.TCPConnections, s.TestDuration)
+		s.TotalTasks.Load(), s.LatencySum/time.Duration(s.TotalTasks.Load()), s.ErrorCounter.Load(), s.TCPConnections, s.TestDuration)
 }
 
-var (
-	_ BenchmarkScenario = &RandomSetsScenario{}
-	_ BenchmarkScenario = &RandomReadsScenario{}
-	_ BenchmarkScenario = &RandomReadSetScenario{}
-	_ BenchmarkScenario = &PipelineScenario{}
-	_ BenchmarkScenario = &TransactionScenario{}
-)
-
-func SetupContinious(rdb *redis.ClusterClient, slots int) {
+func SetupContiniousKeys(rdb *redis.Client, slots int) {
 	ctx, cansel := context.WithTimeout(context.Background(), time.Second)
 	for i := range slots {
 		_, err := rdb.Set(ctx, strconv.Itoa(i), i, 0).Result()
-		if err != nil {
-			cansel()
-			log.Fatal("initial set failed", err)
-		}
-	}
-	cansel()
-}
-
-func SetupContiniousSlotN(rdb *redis.ClusterClient, keys int, n int) {
-	ctx, cansel := context.WithTimeout(context.Background(), time.Second)
-	module := keys / n
-	for i := range keys {
-		_, err := rdb.Set(ctx, strconv.Itoa(i%module), i, 0).Result()
 		if err != nil {
 			cansel()
 			log.Fatal("initial set failed", err)
@@ -96,13 +75,8 @@ func generateTask(generator *rand.Rand, numberOfSlots int) int {
 }
 
 type RandomSetsScenario struct {
-	numberOfSlots int
+	NumberOfSlots int
 	Name          string
-}
-
-func (s *RandomSetsScenario) Setup(rdb *redis.ClusterClient, slots int) {
-	s.numberOfSlots = slots
-	SetupContinious(rdb, s.numberOfSlots)
 }
 
 func (s *RandomSetsScenario) GetName() string {
@@ -126,17 +100,12 @@ func (s *RandomSetsScenario) Run(ctx context.Context, rdb *redis.ClusterClient, 
 }
 
 func (s *RandomSetsScenario) generateTask(generator *rand.Rand) int {
-	return generator.Intn(s.numberOfSlots)
+	return generator.Intn(s.NumberOfSlots)
 }
 
 type RandomReadsScenario struct {
-	numberOfSlots int
+	NumberOfSlots int
 	Name          string
-}
-
-func (s *RandomReadsScenario) Setup(rdb *redis.ClusterClient, slots int) {
-	s.numberOfSlots = slots
-	SetupContinious(rdb, s.numberOfSlots)
 }
 
 func (s *RandomReadsScenario) GetName() string {
@@ -147,7 +116,7 @@ func (s *RandomReadsScenario) Run(ctx context.Context, rdb *redis.ClusterClient,
 	stats := Statistics{}
 
 	scenarioRunBasic(tasks, workers, &stats, func(seed *rand.Rand) (time.Duration, error) {
-		task := generateTask(seed, s.numberOfSlots)
+		task := generateTask(seed, s.NumberOfSlots)
 
 		requestStart := time.Now()
 		_, err := rdb.Get(ctx, strconv.Itoa(task)).Result()
@@ -160,13 +129,8 @@ func (s *RandomReadsScenario) Run(ctx context.Context, rdb *redis.ClusterClient,
 }
 
 type RandomReadSetScenario struct {
-	numberOfSlots int
+	NumberOfSlots int
 	Name          string
-}
-
-func (s *RandomReadSetScenario) Setup(rdb *redis.ClusterClient, slots int) {
-	s.numberOfSlots = slots
-	SetupContinious(rdb, s.numberOfSlots)
 }
 
 func (s *RandomReadSetScenario) GetName() string {
@@ -177,7 +141,7 @@ func (s *RandomReadSetScenario) Run(ctx context.Context, rdb *redis.ClusterClien
 	stats := Statistics{}
 
 	scenarioRunBasic(tasks, workers, &stats, func(seed *rand.Rand) (time.Duration, error) {
-		task := generateTask(seed, s.numberOfSlots)
+		task := generateTask(seed, s.NumberOfSlots)
 
 		var err error
 		requestStart := time.Now()
@@ -195,80 +159,31 @@ func (s *RandomReadSetScenario) Run(ctx context.Context, rdb *redis.ClusterClien
 }
 
 type PipelineScenario struct {
-	numberOfSlots int
+	NumberOfSlots int
 	PipelineSize  int
 	Name          string
 }
 
-func (s *PipelineScenario) Setup(rdb *redis.ClusterClient, slots int) {
-	s.numberOfSlots = slots
-	SetupContinious(rdb, s.numberOfSlots)
-}
-
 func (s *PipelineScenario) GetName() string {
-	return fmt.Sprintf("%s: 1 task(pipelin) = %d commands", s.Name, s.PipelineSize)
+	return s.Name
 }
 
 func (s *PipelineScenario) Run(ctx context.Context, rdb *redis.ClusterClient, tasks int64, workers int) *Statistics {
 	stats := Statistics{}
 
 	scenarioRunBasic(tasks/int64(s.PipelineSize), workers, &stats, func(seed *rand.Rand) (time.Duration, error) {
-		pipe := rdb.Pipeline()
+		pipeline := rdb.Pipeline()
 		for range s.PipelineSize {
-			task := generateTask(seed, s.numberOfSlots)
+			task := generateTask(seed, s.NumberOfSlots)
+			var err error
+			requestStart := time.Now()
 			if seed.Intn(2) == 0 {
-				pipe.Get(ctx, strconv.Itoa(task))
+				_, err = rdb.Get(ctx, strconv.Itoa(task)).Result()
 			} else {
-				pipe.Set(ctx, strconv.Itoa(task), task, 0)
+				_, err = rdb.Set(ctx, strconv.Itoa(task), task, 0).Result()
 			}
+			latency := time.Since(requestStart)
 		}
-
-		requestStart := time.Now()
-		_, err := pipe.Exec(ctx)
-		latency := time.Since(requestStart)
-
-		return latency, err
-	})
-
-	return &stats
-}
-
-type TransactionScenario struct {
-	numberOfSlots int
-	PipelineSize  int
-	KeysPerSlot   int
-	Name          string
-}
-
-func (s *TransactionScenario) Setup(rdb *redis.ClusterClient, slots int) {
-	s.numberOfSlots = slots
-	SetupContiniousSlotN(rdb, s.numberOfSlots, s.KeysPerSlot)
-}
-
-func (s *TransactionScenario) GetName() string {
-	return fmt.Sprintf("%s: 1 task(transaction) = %d commands", s.Name, s.PipelineSize)
-}
-
-func (s *TransactionScenario) Run(ctx context.Context, rdb *redis.ClusterClient, tasks int64, workers int) *Statistics {
-	stats := Statistics{}
-
-	scenarioRunBasic(tasks/int64(s.PipelineSize), workers, &stats, func(seed *rand.Rand) (time.Duration, error) {
-		pipe := rdb.TxPipeline()
-		key := generateTask(seed, s.numberOfSlots)
-		for range s.PipelineSize {
-			task := generateTask(seed, s.numberOfSlots)
-			if seed.Intn(2) == 0 {
-				pipe.Get(ctx, strconv.Itoa(key))
-			} else {
-				pipe.Set(ctx, strconv.Itoa(key), task, 0)
-			}
-		}
-
-		requestStart := time.Now()
-		_, err := pipe.Exec(ctx)
-		latency := time.Since(requestStart)
-
-		return latency, err
 	})
 
 	return &stats

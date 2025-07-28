@@ -16,10 +16,11 @@ const (
 	scenarioMaxDuration = time.Second * 10
 	tasksPerWorker      = 10000
 	workersCount        = 100
-	slots               = 1000
+	slots               = 10000
 )
 
 type BenchmarkScenario interface {
+	Setup(rdb *redis.ClusterClient, slots int)
 	Run(ctx context.Context, rdb *redis.ClusterClient, tasks int64, workers int) *Statistics
 	GetName() string
 }
@@ -94,6 +95,7 @@ func main() {
 			return nil
 		},
 	})
+	defer rdb.Close()
 
 	err := rdb.ForEachShard(context.Background(), func(ctx context.Context, client *redis.Client) error {
 		status, err := client.Ping(ctx).Result()
@@ -110,18 +112,31 @@ func main() {
 	checkClusterHealth(rdb)
 
 	var scenarios []BenchmarkScenario
-	scenarios = append(scenarios, &RandomSetsScenario{
-		NumberOfSlots: slots,
-		Name:          "RandomSets",
-	}, &RandomReadsScenario{
-		NumberOfSlots: slots,
-		Name:          "RandomReads",
-	})
+	scenarios = append(scenarios,
+		&RandomSetsScenario{
+			Name: "RandomSets",
+		},
+		&RandomReadsScenario{
+			Name: "RandomReads",
+		},
+		&RandomReadSetScenario{
+			Name: "RandomReadSet",
+		},
+		&PipelineScenario{
+			PipelineSize: 100,
+			Name:         "Pipeline",
+		},
+		&TransactionScenario{
+			PipelineSize: 100,
+			Name:         "Transaction",
+		},
+	)
 
 	for _, scenario := range scenarios {
+		scenario.Setup(rdb, slots)
 		stats := scenario.Run(context.Background(), rdb, tasksPerWorker, workersCount)
 		stats.TCPConnections = tcpConnections.Load()
-		log.Printf("\n%s\n", scenario.GetName())
-		stats.Display()
+		tcpConnections.Store(0)
+		log.Printf("\n%s%s\n", scenario.GetName(), stats.Display())
 	}
 }
