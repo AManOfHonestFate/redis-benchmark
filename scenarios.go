@@ -27,14 +27,6 @@ func (s *Statistics) Display() string {
 		s.TotalTasks.Load(), s.LatencySum/time.Duration(s.TotalTasks.Load()+s.ErrorCounter.Load()), s.ErrorCounter.Load(), s.TCPConnections, s.TestDuration)
 }
 
-var (
-	_ BenchmarkScenario = &RandomSetsScenario{}
-	_ BenchmarkScenario = &RandomReadsScenario{}
-	_ BenchmarkScenario = &RandomReadSetScenario{}
-	_ BenchmarkScenario = &PipelineScenario{}
-	_ BenchmarkScenario = &TransactionScenario{}
-)
-
 func SetupContinious(rdb *redis.ClusterClient, slots int) {
 	ctx, cansel := context.WithTimeout(context.Background(), time.Second)
 	for i := range slots {

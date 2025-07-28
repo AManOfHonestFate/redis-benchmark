@@ -92,6 +92,14 @@ type BenchmarkScenario interface {
 	GetName() string
 }
 
+var (
+	_ BenchmarkScenario = &RandomSetsScenario{}
+	_ BenchmarkScenario = &RandomReadsScenario{}
+	_ BenchmarkScenario = &RandomReadSetScenario{}
+	_ BenchmarkScenario = &PipelineScenario{}
+	_ BenchmarkScenario = &TransactionScenario{}
+)
+
 func checkClusterHealth(rdb *redis.ClusterClient) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
