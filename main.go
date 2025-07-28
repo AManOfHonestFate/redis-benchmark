@@ -19,62 +19,6 @@ const (
 	slots               = 10000
 )
 
-type BenchmarkScenario interface {
-	Setup(rdb *redis.ClusterClient, slots int)
-	Run(ctx context.Context, rdb *redis.ClusterClient, tasks int64, workers int) *Statistics
-	GetName() string
-}
-
-func checkClusterHealth(rdb *redis.ClusterClient) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Use the first node for cluster info
-	info, err := rdb.Do(ctx, "CLUSTER", "INFO").Text()
-	if err != nil {
-		log.Fatalf("Failed to get cluster info: %v", err)
-	}
-
-	log.Printf("\n\nCLUSTER INFO:\n%s\n\n", info)
-
-	// Parse cluster_state:ok
-	stateLine := ""
-	for _, line := range splitLines(info) {
-		if len(line) > 0 && (line[0] == 'c' || line[0] == 'C') && len(line) > 13 && line[:13] == "cluster_state" {
-			stateLine = line
-			break
-		}
-	}
-	if stateLine == "" || (len(stateLine) > 0 && !containsOk(stateLine)) {
-		log.Fatalf("Cluster is not healthy: %s", stateLine)
-	}
-}
-
-func splitLines(s string) []string {
-	return strings.Split(s, "\n")
-}
-
-func containsOk(s string) bool {
-	return strings.Contains(s, "ok")
-}
-
-func readEnvFile() {
-	file, err := os.Open(".env")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		envVars := strings.Split(scanner.Text(), "=")
-		if len(envVars) != 2 {
-			log.Fatal("Invalid env file format")
-		}
-		os.Setenv(envVars[0], envVars[1])
-	}
-}
-
 func main() {
 	readEnvFile()
 
@@ -128,6 +72,7 @@ func main() {
 		},
 		&TransactionScenario{
 			PipelineSize: 100,
+			KeysPerSlot:  10,
 			Name:         "Transaction",
 		},
 	)
@@ -138,5 +83,61 @@ func main() {
 		stats.TCPConnections = tcpConnections.Load()
 		tcpConnections.Store(0)
 		log.Printf("\n%s%s\n", scenario.GetName(), stats.Display())
+	}
+}
+
+type BenchmarkScenario interface {
+	Setup(rdb *redis.ClusterClient, slots int)
+	Run(ctx context.Context, rdb *redis.ClusterClient, tasks int64, workers int) *Statistics
+	GetName() string
+}
+
+func checkClusterHealth(rdb *redis.ClusterClient) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Use the first node for cluster info
+	info, err := rdb.Do(ctx, "CLUSTER", "INFO").Text()
+	if err != nil {
+		log.Fatalf("Failed to get cluster info: %v", err)
+	}
+
+	log.Printf("\n\nCLUSTER INFO:\n%s\n\n", info)
+
+	// Parse cluster_state:ok
+	stateLine := ""
+	for _, line := range splitLines(info) {
+		if len(line) > 0 && (line[0] == 'c' || line[0] == 'C') && len(line) > 13 && line[:13] == "cluster_state" {
+			stateLine = line
+			break
+		}
+	}
+	if stateLine == "" || (len(stateLine) > 0 && !containsOk(stateLine)) {
+		log.Fatalf("Cluster is not healthy: %s", stateLine)
+	}
+}
+
+func splitLines(s string) []string {
+	return strings.Split(s, "\n")
+}
+
+func containsOk(s string) bool {
+	return strings.Contains(s, "ok")
+}
+
+func readEnvFile() {
+	file, err := os.Open(".env")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		envVars := strings.Split(scanner.Text(), "=")
+		if len(envVars) != 2 {
+			log.Fatal("Invalid env file format")
+		}
+		os.Setenv(envVars[0], envVars[1])
 	}
 }
