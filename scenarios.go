@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math/rand"
 	"strconv"
@@ -21,9 +22,9 @@ type Statistics struct {
 	mu             sync.Mutex
 }
 
-func (s *Statistics) Display() {
-	log.Printf("\n- total tasks: %d\n- average latency: %s\n- errors: %d\n- total connections: %d\n- time: %s\n",
-		s.TotalTasks.Load(), s.LatencySum/time.Duration(s.TotalTasks.Load()), s.ErrorCounter.Load(), s.TCPConnections, s.TestDuration)
+func (s *Statistics) Display() string {
+	return fmt.Sprintf("\n- total tasks: %d\n- average latency: %s\n- errors: %d\n- total connections: %d\n- time: %s\n",
+		s.TotalTasks.Load(), s.LatencySum/time.Duration(s.TotalTasks.Load()+s.ErrorCounter.Load()), s.ErrorCounter.Load(), s.TCPConnections, s.TestDuration)
 }
 
 func SetupContiniousKeys(rdb *redis.Client, slots int) {
@@ -69,6 +70,10 @@ func scenarioRunBasic(tasks int64, workers int, stats *Statistics, do func(*rand
 	stats.TotalTasks.Add(tasks*int64(workers) - stats.ErrorCounter.Load())
 }
 
+func generateTask(generator *rand.Rand, numberOfSlots int) int {
+	return generator.Intn(numberOfSlots)
+}
+
 type RandomSetsScenario struct {
 	NumberOfSlots int
 	Name          string
@@ -111,7 +116,7 @@ func (s *RandomReadsScenario) Run(ctx context.Context, rdb *redis.ClusterClient,
 	stats := Statistics{}
 
 	scenarioRunBasic(tasks, workers, &stats, func(seed *rand.Rand) (time.Duration, error) {
-		task := s.generateTask(seed)
+		task := generateTask(seed, s.NumberOfSlots)
 
 		requestStart := time.Now()
 		_, err := rdb.Get(ctx, strconv.Itoa(task)).Result()
@@ -123,6 +128,101 @@ func (s *RandomReadsScenario) Run(ctx context.Context, rdb *redis.ClusterClient,
 	return &stats
 }
 
-func (s *RandomReadsScenario) generateTask(generator *rand.Rand) int {
-	return generator.Intn(s.NumberOfSlots)
+type RandomReadSetScenario struct {
+	NumberOfSlots int
+	Name          string
+}
+
+func (s *RandomReadSetScenario) GetName() string {
+	return s.Name
+}
+
+func (s *RandomReadSetScenario) Run(ctx context.Context, rdb *redis.ClusterClient, tasks int64, workers int) *Statistics {
+	stats := Statistics{}
+
+	scenarioRunBasic(tasks, workers, &stats, func(seed *rand.Rand) (time.Duration, error) {
+		task := generateTask(seed, s.NumberOfSlots)
+
+		var err error
+		requestStart := time.Now()
+		if seed.Intn(2) == 0 {
+			_, err = rdb.Get(ctx, strconv.Itoa(task)).Result()
+		} else {
+			_, err = rdb.Set(ctx, strconv.Itoa(task), task, 0).Result()
+		}
+		latency := time.Since(requestStart)
+
+		return latency, err
+	})
+
+	return &stats
+}
+
+type PipelineScenario struct {
+	NumberOfSlots int
+	PipelineSize  int
+	Name          string
+}
+
+func (s *PipelineScenario) GetName() string {
+	return fmt.Sprintf("%s: 1 task(pipelin) = %d commands", s.Name, s.PipelineSize)
+}
+
+func (s *PipelineScenario) Run(ctx context.Context, rdb *redis.ClusterClient, tasks int64, workers int) *Statistics {
+	stats := Statistics{}
+
+	scenarioRunBasic(tasks/int64(s.PipelineSize), workers, &stats, func(seed *rand.Rand) (time.Duration, error) {
+		pipe := rdb.Pipeline()
+		for range s.PipelineSize {
+			task := generateTask(seed, s.NumberOfSlots)
+			if seed.Intn(2) == 0 {
+				pipe.Get(ctx, strconv.Itoa(task))
+			} else {
+				pipe.Set(ctx, strconv.Itoa(task), task, 0)
+			}
+		}
+
+		requestStart := time.Now()
+		_, err := pipe.Exec(ctx)
+		latency := time.Since(requestStart)
+
+		return latency, err
+	})
+
+	return &stats
+}
+
+type TransactionScenario struct {
+	NumberOfSlots int
+	PipelineSize  int
+	Name          string
+}
+
+func (s *TransactionScenario) GetName() string {
+	return fmt.Sprintf("%s: 1 task(transaction) = %d commands", s.Name, s.PipelineSize)
+}
+
+func (s *TransactionScenario) Run(ctx context.Context, rdb *redis.ClusterClient, tasks int64, workers int) *Statistics {
+	stats := Statistics{}
+
+	scenarioRunBasic(tasks/int64(s.PipelineSize), workers, &stats, func(seed *rand.Rand) (time.Duration, error) {
+		pipe := rdb.TxPipeline()
+		key := generateTask(seed, s.NumberOfSlots)
+		for range s.PipelineSize {
+			task := generateTask(seed, s.NumberOfSlots)
+			if seed.Intn(2) == 0 {
+				pipe.Get(ctx, strconv.Itoa(key))
+			} else {
+				pipe.Set(ctx, strconv.Itoa(key), task, 0)
+			}
+		}
+
+		requestStart := time.Now()
+		_, err := pipe.Exec(ctx)
+		latency := time.Since(requestStart)
+
+		return latency, err
+	})
+
+	return &stats
 }
